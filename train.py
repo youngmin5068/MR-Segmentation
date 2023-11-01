@@ -10,7 +10,7 @@ from loss import *
 from metric import *
 from monai.transforms import AsDiscrete
 from dataloader import data_load
-
+from tumorSeg_model import tumor_model
 from roi_model import ROI_MODEL
 
 
@@ -51,7 +51,7 @@ def train_net(net,
     #scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer,T_0=10,T_mult=2,eta_min=0.00001,last_epoch=-1)
     scheduler = optim.lr_scheduler.MultiStepLR(optimizer,milestones=[80],gamma=5)
     diceloss = DiceLoss()
-    bceloss = marginBCELoss()
+    bceloss = nn.BCEWithLogitsLoss()
     threshold = AsDiscrete(threshold=0.5)
     best_epoch = 0
     best_dice = 0.0
@@ -140,7 +140,7 @@ def train_net(net,
                     logging.info("Created checkpoint directory")
                 except OSError:
                     pass
-                torch.save(net.state_dict(), DIR_CHECKPOINT + f'/haam_SwinUNetr_231030.pth')
+                torch.save(net.state_dict(), DIR_CHECKPOINT + f'/Deform_LKA_231101.pth')
                 logging.info(f'Checkpoint {epoch + 1} saved !')
 
         print("epoch : {} , best_dice : {:.4f}, best_recall : {:.4f}, best_precision : {:.4f}".format(best_epoch, best_dice,best_recall,best_precision))
@@ -153,14 +153,13 @@ if __name__ == '__main__':
     device = torch.device(f'cuda:0' if torch.cuda.is_available() else 'cpu')
     logging.info(f'Using device {device}')
 
-
+    net = tumor_model(img_size=(512,512),spatial_dims=2,in_channels=1,out_channels=1,depths=(2,2,2,2)).to(device=device)
 
     if torch.cuda.device_count() > 1:
         net = nn.DataParallel(net,device_ids=[0,1,2,3])
 
 
     model_path = ROI_MODEL_PATH
-
     roi_model = ROI_MODEL(img_size=(512,512),spatial_dims=2,in_channels=1,out_channels=1,depths=(2,2,2,2)).to(device=device)
     if torch.cuda.device_count() > 1:
         roi_model = nn.DataParallel(roi_model,device_ids=[0,1,2,3]) 
