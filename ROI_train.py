@@ -132,11 +132,11 @@ def train_net(net,
 
             if save_cp:
                 try:
-                    os.mkdir(DIR_CHECKPOINT)
+                    os.mkdir(B_DIR_CHECKPOINT)
                     logging.info("Created checkpoint directory")
                 except OSError:
                     pass
-                torch.save(net.state_dict(), DIR_CHECKPOINT + f'/ROI_Model.pth')
+                torch.save(net.state_dict(), B_DIR_CHECKPOINT + f'/ROI_Model_231102.pth')
                 logging.info(f'Checkpoint {epoch + 1} saved !')
 
         print("epoch : {} , best_dice : {:.4f}, best_recall : {:.4f}, best_precision : {:.4f}".format(best_epoch, best_dice,best_recall,best_precision))
