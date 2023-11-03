@@ -6,7 +6,7 @@ import torchvision.transforms as transforms
 import os
 from einops import rearrange
 from custom_transforms import *
-import pydicom as dcm
+import pydicom
 from pydicom.pixel_data_handlers.util import apply_voi_lut
 from monai.transforms import AsDiscrete
 
@@ -37,7 +37,8 @@ class tumor_Dataset(Dataset):
         return len(self.label_path_list)
 
     def preprocessing(self,train_path, label_path):
-        input_slice = dcm.read_file(train_path)
+
+        input_slice = pydicom.read_file(train_path)
         input_img = input_slice.pixel_array
         input_img = apply_voi_lut(input_img, input_slice)
         epsilon = 1e-10
@@ -46,13 +47,16 @@ class tumor_Dataset(Dataset):
         input_img = (input_img - min_val) / (max_val - min_val+epsilon)
         input_img = Image.fromarray(input_img)
 
-        label_img = dcm.read_file(label_path).pixel_array
-        min_val = np.min(label_img)
-        max_val = np.max(label_img)
-        label_img = (label_img - min_val) / (max_val - min_val+epsilon)
-        label = Image.fromarray(label)
+        target_slice = pydicom.read_file(label_path)
+        target_img = target_slice.pixel_array
+        epsilon = 1e-10
+        min_val = np.min(target_img)
+        max_val = np.max(target_img)
+        target_img = (target_img - min_val) / (max_val - min_val+epsilon)
 
-        return input_img, label
+        target_img = Image.fromarray(target_img)
+
+        return input_img, target_img
 
     def __getitem__(self,idx):
         if self.train:
@@ -67,16 +71,18 @@ class tumor_Dataset(Dataset):
                                                  transforms.Resize((512,512))
                                                  ])
 
-                                                 
+        
+
         image,label = self.preprocessing(self.train_path_list[idx], self.label_path_list[idx])    
 
-        input_image = self.transform(image)
-        target_image = self.transform(label)
+        input_image = self.transform((image))
+        target_image = self.transform((label))
 
         threshold = AsDiscrete(threshold=0.5)
-        thresh = threshold(target_image)
+        target_image = threshold(target_image)
 
-        return input_image, thresh
+
+        return input_image, target_image
     
 if __name__ == "__main__":
     dataset_path = "/mount_folder/"
