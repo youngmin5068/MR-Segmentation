@@ -9,8 +9,10 @@ from config import *
 from loss import *
 from metric import *
 from monai.transforms import AsDiscrete
+from dataset import tumor_Dataset
 from dataloader import data_load
 from tumorSeg_model import tumor_model
+from Deform_LKA import Deform_UNet
 from roi_model import ROI_MODEL
 
 
@@ -32,10 +34,11 @@ def train_net(net,
               lr=LEARNINGRATE,
               save_cp=True
               ):
-
-
-    train_loader, train_size = data_load(path=TRAIN_PATH,batch_size=batch_size,train=True,shuffle=True)
-    val_loader,val_size = data_load(path=TUNING_PATH,batch_size=batch_size,train=False,shuffle=False)
+    validation_interval = 20
+    train_dataset = tumor_Dataset(path=TRAIN_PATH)
+    tuning_dataset = tumor_Dataset(path=TUNING_PATH)
+    train_loader, train_size = data_load(train_dataset,batch_size=batch_size,train=True,shuffle=True)
+    val_loader,val_size = data_load(tuning_dataset,batch_size=batch_size,train=False,shuffle=False)
 
     logging.info(f'''Starting training:
         Epochs:          {epochs}
@@ -48,8 +51,8 @@ def train_net(net,
     ''')    
 
     optimizer = optim.AdamW(net.parameters(),betas=(0.9,0.999),lr=lr) # weight_decay : prevent overfitting
-    #scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer,T_0=10,T_mult=2,eta_min=0.00001,last_epoch=-1)
-    scheduler = optim.lr_scheduler.MultiStepLR(optimizer,milestones=[80],gamma=5)
+    scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer,T_0=10,T_mult=1,eta_min=0.00001,last_epoch=-1)
+    #scheduler = optim.lr_scheduler.MultiStepLR(optimizer,milestones=[80],gamma=5)
     diceloss = DiceLoss()
     bceloss = nn.BCEWithLogitsLoss()
     threshold = AsDiscrete(threshold=0.5)
@@ -97,13 +100,18 @@ def train_net(net,
                                                                                 loss2.detach(),
                                                                                 loss.detach())) 
             i += 1
-
+        
         #when train epoch end
         print("--------------Validation start----------------")
         net.eval()      
         dice = 0.0
         recall = 0.0
         precision = 0.0
+
+        TP_total = 0 
+        FP_total = 0 
+        FN_total = 0 
+        TN_total = 0 
 
         for imgs, true_masks in val_loader:
             imgs = imgs.to(device=device,dtype=torch.float32)
@@ -119,19 +127,40 @@ def train_net(net,
 
             pred_thresh = threshold(mask_pred)
 
-            precision += precision_score(pred_thresh,true_masks)
-            recall += recall_score(pred_thresh,true_masks)
-            dice += dice_score(pred_thresh,true_masks)
-            
+            predicted_mask = pred_thresh.cpu().numpy()
+            true_mask = true_masks.cpu().numpy()
 
-        print("dice score : {:.4f}, len(val_loader) : {:.4f}".format(dice, len(val_loader)))
-        print("dice score : {:.4f}, recall score : {:.4f}, precision score : {:.4f}".format(dice/len(val_loader), recall/len(val_loader),precision/len(val_loader)) )
+            # 이진 분류를 위한 threshold 적용
+            predicted_mask = (predicted_mask > 0.5).astype(np.uint8)
+            
+            # 현재 slice에 대한 confusion matrix 요소 계산
+            TP = np.sum((predicted_mask == 1) & (true_mask == 1))
+            FP = np.sum((predicted_mask == 1) & (true_mask == 0))
+            FN = np.sum((predicted_mask == 0) & (true_mask == 1))
+            TN = np.sum((predicted_mask == 0) & (true_mask == 0))
+            
+            # 현재 slice의 결과를 전체 결과에 합산
+            TP_total += TP
+            FP_total += FP
+            FN_total += FN
+            TN_total += TN
+    
+            # 모든 slices를 기반으로 한 Dice Score 계산
+            dice = (2 * TP_total) / (2 * TP_total + FP_total + FN_total)
+
+            # precision += precision_score(pred_thresh,true_masks)
+            # recall += recall_score(pred_thresh,true_masks)
+            #dice += dice_score(pred_thresh,true_masks)
+            
+        print("dice score : {:.4f}".format(dice))
+        # print("dice score : {:.4f}, len(val_loader) : {:.4f}".format(dice, len(val_loader)))
+        # print("dice score : {:.4f}, recall score : {:.4f}, precision score : {:.4f}".format(dice/len(val_loader), recall/len(val_loader),precision/len(val_loader)) )
         scheduler.step()
         
-        if dice/len(val_loader) > best_dice:
-            best_dice = dice/len(val_loader)
-            best_recall = recall/len(val_loader)
-            best_precision = precision/len(val_loader)
+        if dice > best_dice:
+            best_dice = dice
+            # best_recall = recall/len(val_loader)
+            # best_precision = precision/len(val_loader)
             best_epoch = epoch+1
 
             if save_cp:
@@ -140,10 +169,10 @@ def train_net(net,
                     logging.info("Created checkpoint directory")
                 except OSError:
                     pass
-                torch.save(net.state_dict(), DIR_CHECKPOINT + f'/Deform_LKA_231101.pth')
+                torch.save(net.state_dict(), DIR_CHECKPOINT + f'/Deform_UNet_231105.pth')
                 logging.info(f'Checkpoint {epoch + 1} saved !')
-
-        print("epoch : {} , best_dice : {:.4f}, best_recall : {:.4f}, best_precision : {:.4f}".format(best_epoch, best_dice,best_recall,best_precision))
+        print("best_dice : {:.4f}".format(best_dice))
+        #print("epoch : {} , best_dice : {:.4f}, best_recall : {:.4f}, best_precision : {:.4f}".format(best_epoch, best_dice,best_recall,best_precision))
 
 if __name__ == '__main__':
     Model_SEED = 7777777
@@ -153,8 +182,8 @@ if __name__ == '__main__':
     device = torch.device(f'cuda:0' if torch.cuda.is_available() else 'cpu')
     logging.info(f'Using device {device}')
 
-    net = tumor_model(img_size=(512,512),spatial_dims=2,in_channels=1,out_channels=1,depths=(2,2,2,2)).to(device=device)
-
+    #net = tumor_model(img_size=(512,512),spatial_dims=2,in_channels=1,out_channels=1,depths=(2,2,2,2)).to(device=device)
+    net = Deform_UNet(1,1).to(device=device)
     if torch.cuda.device_count() > 1:
         net = nn.DataParallel(net,device_ids=[0,1,2,3])
 
