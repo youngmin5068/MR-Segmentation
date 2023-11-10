@@ -45,6 +45,7 @@ class tumor_Dataset(Dataset):
         min_val = np.min(input_img)
         max_val = np.max(input_img)
         input_img = (input_img - min_val) / (max_val - min_val+epsilon)
+        input_img[:150, :] = 0
         input_img = Image.fromarray(input_img)
 
         target_slice = pydicom.read_file(label_path)
@@ -85,7 +86,7 @@ class tumor_Dataset(Dataset):
         return input_image, target_image
     
 if __name__ == "__main__":
-    dataset_path = "/mount_folder/"
+    dataset_path = "/mount_folder/Tumors/train/undersampling"
     dataset = tumor_Dataset(dataset_path)
     print(len(dataset))
     dataloader = DataLoader(dataset,batch_size=1,shuffle=True)
