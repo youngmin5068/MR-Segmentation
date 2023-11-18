@@ -5,6 +5,7 @@ from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 import math
 from torch.autograd import Variable
 from torchvision.ops import deform_conv2d
+import torch.nn.functional as F
 
 '''
 Deform Block
@@ -104,7 +105,6 @@ class LKA(nn.Module):
     def __init__(self, dim):
         super().__init__()
         self.conv0 = nn.Conv2d(dim, dim, 5, padding=2, groups=dim)
-        #self.conv0 = customDeformConv(dim, dim, 5, padding=2)
         self.conv_spatial = nn.Conv2d(dim, dim, 7, stride=1, padding=9, groups=dim, dilation=3)
         self.conv1 = nn.Conv2d(dim, dim, 1)
 
@@ -239,7 +239,7 @@ def logsumexp_2d(tensor):
     return outputs
 
 class TopTPercentChannelGate(nn.Module):
-    def __init__(self, gate_channels, percent_t, reduction_ratio=16, pool_types=['avg', 'max']):
+    def __init__(self, gate_channels, percent_t=1.0, reduction_ratio=16, pool_types=['avg', 'max']):
         super(TopTPercentChannelGate, self).__init__()
         self.gate_channels = gate_channels
         self.percent_t = percent_t
@@ -319,3 +319,66 @@ class Topt_CBAM(nn.Module):
 # sample = torch.randn((1,1,512,512))
 # model = DeformBlock(1)
 # print(model(sample).shape)
+
+
+
+
+class Flatten(nn.Module):
+    def forward(self, x):
+        return x.view(x.size(0), -1)
+
+class ChannelGate(nn.Module):
+    def __init__(self, gate_channels, reduction_ratio=16, pool_types=['avg', 'max']):
+        super(ChannelGate, self).__init__()
+        self.gate_channels = gate_channels
+        self.mlp = nn.Sequential(
+            Flatten(),
+            nn.Linear(gate_channels, gate_channels // reduction_ratio),
+            nn.ReLU(),
+            nn.Linear(gate_channels // reduction_ratio, gate_channels)
+            )
+        self.pool_types = pool_types
+    def forward(self, x):
+        channel_att_sum = None
+        for pool_type in self.pool_types:
+            if pool_type=='avg':
+                avg_pool = F.avg_pool2d( x, (x.size(2), x.size(3)), stride=(x.size(2), x.size(3)))
+                channel_att_raw = self.mlp( avg_pool )
+            elif pool_type=='max':
+                max_pool = F.max_pool2d( x, (x.size(2), x.size(3)), stride=(x.size(2), x.size(3)))
+                channel_att_raw = self.mlp( max_pool )
+
+            if channel_att_sum is None:
+                channel_att_sum = channel_att_raw
+            else:
+                channel_att_sum = channel_att_sum + channel_att_raw
+
+        scale = torch.sigmoid( channel_att_sum ).unsqueeze(2).unsqueeze(3).expand_as(x)
+        return x * scale
+
+class custom_LKA(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        #self.conv_spatial1 = nn.Conv2d(2, dim, 5, stride=1, padding=6, dilation=3)
+
+        self.conv_spatial1 = nn.Conv2d(2, dim, 5, stride=1,padding=2)
+        self.conv_spatial2 = nn.Conv2d(dim, dim, 7, stride=1, padding=9, dilation=6)
+       # self.norm = nn.GroupNorm(dim,dim)
+        self.conv1 = nn.Conv2d(dim, dim, 1)
+
+        self.act = nn.Sigmoid()
+
+    def forward(self, x):
+        u = x.clone()
+        avg_out = torch.mean(x,dim=1, keepdim=True)
+        max_out,_ = torch.max(x,dim=1, keepdim=True)   
+        x = torch.cat([avg_out, max_out],dim=1)
+        
+        x = self.conv_spatial1(x)
+        x = self.conv_spatial2(x)
+        #x = self.norm(x)
+        x = self.conv1(x)
+        x = self.act(x)
+
+        return x * u
+
