@@ -362,8 +362,8 @@ class custom_LKA(nn.Module):
         #self.conv_spatial1 = nn.Conv2d(2, dim, 5, stride=1, padding=6, dilation=3)
 
         self.conv_spatial1 = nn.Conv2d(2, dim, 5, stride=1,padding=2)
-        self.conv_spatial2 = nn.Conv2d(dim, dim, 7, stride=1, padding=9, dilation=3,groups=dim)
-        #self.norm = nn.GroupNorm(dim,dim)
+        self.conv_spatial2 = nn.Conv2d(dim, dim, 7, stride=1, padding=3)
+        self.norm = nn.GroupNorm(dim,dim)
         self.conv1 = nn.Conv2d(dim, dim, 1)
 
         self.act = nn.Sigmoid()
@@ -376,7 +376,7 @@ class custom_LKA(nn.Module):
         
         x = self.conv_spatial1(x)
         x = self.conv_spatial2(x)
-        #x = self.norm(x)
+        x = self.norm(x)
         x = self.conv1(x)
         x = self.act(x)
 
