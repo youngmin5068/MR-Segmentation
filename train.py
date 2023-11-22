@@ -14,6 +14,10 @@ from dataloader import data_load
 from tumorSeg_model import tumor_model
 from Deform_LKA import Deform_UNet
 from roi_model import ROI_MODEL
+from ACC_UNet import ACC_UNet_Lite
+from my_custom_UNet import custom_UNet
+from Nested_UNet import NestedUNet
+import torchvision.transforms as transforms
 
 
 def set_seed(seed):
@@ -26,15 +30,14 @@ def set_seed(seed):
 
 
 
-def train_net(net,
-              roi_model,          
+def train_net(net,      
               device,     
               epochs=EPOCHS,
               batch_size=BATCH_SIZE,
               lr=LEARNINGRATE,
               save_cp=True
               ):
-    validation_interval = 20
+
     train_dataset = tumor_Dataset(path=TRAIN_PATH)
     tuning_dataset = tumor_Dataset(path=TUNING_PATH)
     train_loader, train_size = data_load(train_dataset,batch_size=batch_size,train=True,shuffle=True)
@@ -50,21 +53,24 @@ def train_net(net,
         Device:          {device}
     ''')    
 
-    optimizer = optim.AdamW(net.parameters(),betas=(0.9,0.999),lr=lr) # weight_decay : prevent overfitting
-    #scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer,T_0=10,T_mult=1,eta_min=0.00001,last_epoch=-1)
-    scheduler = optim.lr_scheduler.MultiStepLR(optimizer,milestones=[80],gamma=5)
+    optimizer = optim.AdamW(net.parameters(),betas=(0.9,0.999),lr=lr,weight_decay=1e-6) # weight_decay : prevent overfitting
+    #scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer,T_0=10,T_mult=2,eta_min=0.0001,last_epoch=-1)
+    scheduler = optim.lr_scheduler.MultiStepLR(optimizer,milestones=[30],gamma=5)
     diceloss = DiceLoss()
-    bceloss = nn.BCEWithLogitsLoss()
+    focalloss = FocalLoss()
+   
     threshold = AsDiscrete(threshold=0.5)
 
+    best_epoch = 0 
     best_loss = 10 ** 9 # 매우 큰 값으로 초기값 가정
-    patience_limit = 10 # 몇 번의 epoch까지 지켜볼지를 결정
+    best_dice = 0.0
+    patience_limit = 500 # 몇 번의 epoch까지 지켜볼지를 결정
     patience_check = 0
 
     for epoch in range(epochs):
 
         net.train()
-        roi_model.eval()
+        #roi_model.eval()
         i=1
         for imgs,true_masks in train_loader:
 
@@ -74,17 +80,15 @@ def train_net(net,
             for param in net.parameters():
                 param.grad = None
 
-            with torch.no_grad():
-                roi_preds = torch.sigmoid(roi_model(imgs))
-                roi_thresh = threshold(roi_preds)
-                roi_results = imgs * roi_thresh
+            # with torch.no_grad():
+            #     roi_preds = torch.sigmoid(roi_model(imgs))
+            #     roi_thresh = threshold(roi_preds)
+            #     roi_results = imgs * roi_thresh
 
-            masks_preds = net(roi_results)
+            masks_preds = net(imgs)
             loss1 = diceloss(torch.sigmoid(masks_preds),true_masks)
-            loss2 = bceloss(masks_preds,true_masks)
-            
-
-            loss = loss1+loss2
+            loss2 = focalloss(torch.sigmoid(masks_preds),true_masks)
+            loss = loss1 + loss2
             loss.backward()
 
             nn.utils.clip_grad_value_(net.parameters(), 0.1)     
@@ -92,13 +96,12 @@ def train_net(net,
             optimizer.step()
 
             if i*batch_size%800 == 0:
-                print('epoch : {}, index : {}/{}, dice loss : {:.4f}, bce loss : {:.4f}, total loss : {:.4f}'.format(
+                print('epoch : {}, index : {}/{},dice loss : {:.4f}, focal loss : {:.4f}'.format(
                                                                                 epoch+1, 
                                                                                 i*batch_size,
                                                                                 train_size,
                                                                                 loss1.detach(),
-                                                                                loss2.detach(),
-                                                                                loss.detach())) 
+                                                                                loss2.detach())) 
             i += 1
         
         #when train epoch end
@@ -106,33 +109,35 @@ def train_net(net,
         net.eval()      
 
         val_loss = 0.0
-
+        dice = 0.0
         for imgs, true_masks in val_loader:
             imgs = imgs.to(device=device,dtype=torch.float32)
             true_masks = true_masks.to(device=device,dtype=torch.float32)
 
             with torch.no_grad():
-                roi_preds = torch.sigmoid(roi_model(imgs))
-                roi_thresh = threshold(roi_preds)
-                roi_results = imgs * roi_thresh
+                # roi_preds = torch.sigmoid(roi_model(imgs))
+                # roi_thresh = threshold(roi_preds)
+                # roi_results = imgs * roi_thresh
 
-                mask_pred = net(roi_results)
-                mask_pred = torch.sigmoid(mask_pred)
+                mask_pred = net(imgs)
 
-            #pred_thresh = threshold(mask_pred)
-
-            loss1 = diceloss(mask_pred,true_masks)
-            loss2 = bceloss(mask_pred,true_masks)
-
-            loss = loss1 + loss2
+            pred_thresh = threshold(mask_pred)
             
+            loss = diceloss(torch.sigmoid(mask_pred),true_masks) + focalloss(mask_pred,true_masks)
+            dice += dice_score(pred_thresh, true_masks)
             val_loss += loss.item() 
 
-        if val_loss > best_loss: # loss가 개선되지 않은 경우
+        mean_val_loss = val_loss/len(val_loader)
+        mean_dice_score = dice/len(val_loader)
+
+        if mean_dice_score < best_dice: # dice가 개선되지 않은 경우
+            print("current loss : {:.4f}, current dice : {:.4f}".format(mean_val_loss, mean_dice_score))
             patience_check += 1
         else:
-            print("UPDATE loss")
-            best_loss = val_loss
+            print("UPDATE dice, loss")
+            best_epoch = epoch
+            best_loss = mean_val_loss
+            best_dice = mean_dice_score
             patience_check = 0 
             if save_cp:
                 try:
@@ -140,13 +145,13 @@ def train_net(net,
                     logging.info("Created checkpoint directory")
                 except OSError:
                     pass
-                torch.save(net.state_dict(), DIR_CHECKPOINT + f'/LKA_SwinUNetr_earlystopping.pth')
+                torch.save(net.state_dict(), DIR_CHECKPOINT + f'/custom_UNet_v_0_1_b.pth')
                 logging.info(f'Checkpoint {epoch + 1} saved !')
 
         if patience_check >= patience_limit: # early stopping 조건 만족 시 조기 종료
             break
 
-        print("best loss : {:.4f}".format(best_loss))
+        print("best epoch : {}, best loss : {:.4f}, best dice : {:.4f}".format(best_epoch+1, best_loss,best_dice))
                
   
         scheduler.step()
@@ -160,20 +165,21 @@ if __name__ == '__main__':
     device = torch.device(f'cuda:0' if torch.cuda.is_available() else 'cpu')
     logging.info(f'Using device {device}')
 
-    net = tumor_model(img_size=(512,512),spatial_dims=2,in_channels=1,out_channels=1,depths=(2,2,2,2)).to(device=device)
-    #net = Deform_UNet(1,1).to(device=device)
+    #net = tumor_model(img_size=(512,512),spatial_dims=2,in_channels=1,out_channels=1,depths=(2,2,2,2),feature_size=36).to(device=device)
+    net = custom_UNet(1,1).to(device=device)
+    #net = ACC_UNet_Lite(1,1).to(device=device)
     if torch.cuda.device_count() > 1:
-        net = nn.DataParallel(net,device_ids=[0,1,2,3])
+        net = nn.DataParallel(net,device_ids=[0,1,2,3,4])
 
 
-    model_path = ROI_MODEL_PATH
-    roi_model = ROI_MODEL(img_size=(512,512),spatial_dims=2,in_channels=1,out_channels=1,depths=(2,2,2,2)).to(device=device)
-    if torch.cuda.device_count() > 1:
-        roi_model = nn.DataParallel(roi_model,device_ids=[0,1,2,3]) 
+    # model_path = B_DIR_CHECKPOINT + '/ROI_Model_231114.pth'
+    # roi_model = tumor_model(img_size=(512,512),spatial_dims=2,in_channels=1,out_channels=1,depths=(2,2,2,2),feature_size=24).to(device=device)
+    # if torch.cuda.device_count() > 1:
+    #     roi_model = nn.DataParallel(roi_model,device_ids=[0,1,2,3]) 
 
-    roi_model.load_state_dict(torch.load(model_path))
+    # roi_model.load_state_dict(torch.load(model_path))
 
-    train_net(net=net,roi_model=roi_model,batch_size=BATCH_SIZE,lr=LEARNINGRATE,epochs=EPOCHS,device=device)
+    train_net(net=net,batch_size=BATCH_SIZE,lr=LEARNINGRATE,epochs=EPOCHS,device=device)
 
 
 
