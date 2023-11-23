@@ -74,7 +74,9 @@ def train_net(net,
         #roi_model.eval()
         i=1
         for imgs,true_masks in train_loader:
-
+    
+            imgs = imgs.to(device=device, dtype=torch.float32)
+            true_masks = [true_mask.to(device=device,dtype=torch.float32) for true_mask in true_masks]
             for param in net.parameters():
                 param.grad = None
 
@@ -84,11 +86,11 @@ def train_net(net,
             #     roi_results = imgs * roi_thresh
 
             masks_preds = net(imgs)
-            loss1 = diceloss(torch.sigmoid(masks_preds[0].to(device=device,dtype=torch.float32)),true_masks[0].to(device=device,dtype=torch.float32))
-            loss2 = diceloss(torch.sigmoid(masks_preds[1].to(device=device,dtype=torch.float32)),true_masks[1].to(device=device,dtype=torch.float32))
-            loss3 = diceloss(torch.sigmoid(masks_preds[2].to(device=device,dtype=torch.float32)),true_masks[2].to(device=device,dtype=torch.float32))
-            loss4 = diceloss(torch.sigmoid(masks_preds[3].to(device=device,dtype=torch.float32)),true_masks[3].to(device=device,dtype=torch.float32))
-            loss5 = diceloss(torch.sigmoid(masks_preds[4].to(device=device,dtype=torch.float32)),true_masks[4].to(device=device,dtype=torch.float32))
+            loss1 = diceloss(torch.sigmoid(masks_preds[0]),true_masks[0])
+            loss2 = diceloss(torch.sigmoid(masks_preds[1]),true_masks[1])
+            loss3 = diceloss(torch.sigmoid(masks_preds[2]),true_masks[2])
+            loss4 = diceloss(torch.sigmoid(masks_preds[3]),true_masks[3])
+            loss5 = diceloss(torch.sigmoid(masks_preds[4]),true_masks[4])
             
             #loss2 = bceloss(masks_preds,true_masks)
             loss = loss1 + loss2 + loss3 + loss4 + loss5
@@ -115,19 +117,14 @@ def train_net(net,
         dice = 0.0
         for imgs, true_masks in val_loader:
             imgs = imgs.to(device=device,dtype=torch.float32)
-            true_masks = true_masks.to(device=device,dtype=torch.float32)
+            true_masks = [true_mask.to(device=device,dtype=torch.float32) for true_mask in true_masks]
 
             with torch.no_grad():
-                # roi_preds = torch.sigmoid(roi_model(imgs))
-                # roi_thresh = threshold(roi_preds)
-                # roi_results = imgs * roi_thresh
-
                 mask_pred = net(imgs)
 
             pred_thresh = threshold(mask_pred)
             
-            dice += dice_score(pred_thresh, true_masks)
-            val_loss += loss.item() 
+            dice += dice_score(pred_thresh, true_masks[0])
 
         mean_dice_score = dice/len(val_loader)
 
@@ -166,7 +163,7 @@ if __name__ == '__main__':
     logging.info(f'Using device {device}')
 
     #net = tumor_model(img_size=(512,512),spatial_dims=2,in_channels=1,out_channels=1,depths=(2,2,2,2),feature_size=36).to(device=device)
-    net = custom_UNet_V1(1,1).to(device=device)
+    net = custom_UNet_V2(1,1).to(device=device)
     #net = ACC_UNet_Lite(1,1).to(device=device)
     if torch.cuda.device_count() > 1:
         net = nn.DataParallel(net,device_ids=[0,1,2,3])
