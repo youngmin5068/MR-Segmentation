@@ -90,7 +90,7 @@ class tumor_Dataset(Dataset):
         target_4 = self.resize(32)(target_image)
 
 
-        return input_image, [target_image,target_1,target_2,target_3,target_4]
+        return input_image, (target_image,target_1,target_2,target_3,target_4)
     
 if __name__ == "__main__":
     dataset_path = "/mount_folder/Tumors/train/undersampling"

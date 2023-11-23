@@ -56,7 +56,7 @@ def train_net(net,
 
     optimizer = optim.AdamW(net.parameters(),betas=(0.9,0.999),lr=lr,weight_decay=1e-5) # weight_decay : prevent overfitting
     #scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer,T_0=10,T_mult=2,eta_min=0.00005,last_epoch=-1)
-    scheduler = optim.lr_scheduler.MultiStepLR(optimizer,milestones=[50],gamma=0.1)
+    scheduler = optim.lr_scheduler.MultiStepLR(optimizer,milestones=[30],gamma=5)
     diceloss = DiceLoss()
     bceloss = nn.BCEWithLogitsLoss()
    
@@ -75,9 +75,6 @@ def train_net(net,
         i=1
         for imgs,true_masks in train_loader:
 
-            imgs = imgs.to(device=device,dtype=torch.float32)
-            true_masks = true_masks.to(device=device,dtype=torch.float32)
-
             for param in net.parameters():
                 param.grad = None
 
@@ -87,11 +84,11 @@ def train_net(net,
             #     roi_results = imgs * roi_thresh
 
             masks_preds = net(imgs)
-            loss1 = diceloss(torch.sigmoid(masks_preds[0]),true_masks[0])
-            loss2 = diceloss(torch.sigmoid(masks_preds[1]),true_masks[1])
-            loss3 = diceloss(torch.sigmoid(masks_preds[2]),true_masks[2])
-            loss4 = diceloss(torch.sigmoid(masks_preds[3]),true_masks[3])
-            loss5 = diceloss(torch.sigmoid(masks_preds[4]),true_masks[4])
+            loss1 = diceloss(torch.sigmoid(masks_preds[0].to(device=device,dtype=torch.float32)),true_masks[0].to(device=device,dtype=torch.float32))
+            loss2 = diceloss(torch.sigmoid(masks_preds[1].to(device=device,dtype=torch.float32)),true_masks[1].to(device=device,dtype=torch.float32))
+            loss3 = diceloss(torch.sigmoid(masks_preds[2].to(device=device,dtype=torch.float32)),true_masks[2].to(device=device,dtype=torch.float32))
+            loss4 = diceloss(torch.sigmoid(masks_preds[3].to(device=device,dtype=torch.float32)),true_masks[3].to(device=device,dtype=torch.float32))
+            loss5 = diceloss(torch.sigmoid(masks_preds[4].to(device=device,dtype=torch.float32)),true_masks[4].to(device=device,dtype=torch.float32))
             
             #loss2 = bceloss(masks_preds,true_masks)
             loss = loss1 + loss2 + loss3 + loss4 + loss5
@@ -129,20 +126,17 @@ def train_net(net,
 
             pred_thresh = threshold(mask_pred)
             
-            loss = diceloss(torch.sigmoid(mask_pred),true_masks)
             dice += dice_score(pred_thresh, true_masks)
             val_loss += loss.item() 
 
-        mean_val_loss = val_loss/len(val_loader)
         mean_dice_score = dice/len(val_loader)
 
         if mean_dice_score < best_dice: # dice가 개선되지 않은 경우
-            print("current loss : {:.4f}, current dice : {:.4f}".format(mean_val_loss, mean_dice_score))
+            print("current dice : {:.4f}".format(mean_dice_score))
             patience_check += 1
         else:
             print("UPDATE dice, loss")
             best_epoch = epoch
-            best_loss = mean_val_loss
             best_dice = mean_dice_score
             patience_check = 0 
             if save_cp:
@@ -168,14 +162,14 @@ if __name__ == '__main__':
     set_seed(Model_SEED)
 
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
-    device = torch.device(f'cuda:2' if torch.cuda.is_available() else 'cpu')
+    device = torch.device(f'cuda:0' if torch.cuda.is_available() else 'cpu')
     logging.info(f'Using device {device}')
 
     #net = tumor_model(img_size=(512,512),spatial_dims=2,in_channels=1,out_channels=1,depths=(2,2,2,2),feature_size=36).to(device=device)
     net = custom_UNet_V1(1,1).to(device=device)
     #net = ACC_UNet_Lite(1,1).to(device=device)
     if torch.cuda.device_count() > 1:
-        net = nn.DataParallel(net,device_ids=[2,3,4,5])
+        net = nn.DataParallel(net,device_ids=[0,1,2,3])
 
 
     # model_path = B_DIR_CHECKPOINT + '/ROI_Model_231114.pth'
