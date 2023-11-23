@@ -45,7 +45,6 @@ class tumor_Dataset(Dataset):
         min_val = np.min(input_img)
         max_val = np.max(input_img)
         input_img = (input_img - min_val) / (max_val - min_val+epsilon)
-        input_img[:150, :] = 0
         input_img = Image.fromarray(input_img)
 
         target_slice = pydicom.read_file(label_path)
@@ -54,10 +53,13 @@ class tumor_Dataset(Dataset):
         min_val = np.min(target_img)
         max_val = np.max(target_img)
         target_img = (target_img - min_val) / (max_val - min_val+epsilon)
-
         target_img = Image.fromarray(target_img)
 
         return input_img, target_img
+
+    def resize(self,size):
+        
+        return  transforms.Resize((size,size))
 
     def __getitem__(self,idx):
         if self.train:
@@ -65,14 +67,14 @@ class tumor_Dataset(Dataset):
                                                 transforms.Resize((512,512)),
                                                 customRandomRotate(degrees=180,SEED=idx),
                                                 customRandomHorizontalFlip(p=0.5,SEED=idx),
-                                                #customRandomResizedCrop(SEED=idx,size=(256,256))
+                                                #customRandomResizedCrop(SEED=idx, size=(256,256))
                                                 ])
         else:
             self.transform = transforms.Compose([transforms.ToTensor(),
-                                                 transforms.Resize((512,512))
+                                                 transforms.Resize((512,512)),
+                                                 #customRandomResizedCrop(SEED=idx, size=(256,256))
                                                  ])
 
-        
 
         image,label = self.preprocessing(self.train_path_list[idx], self.label_path_list[idx])    
 
@@ -82,12 +84,18 @@ class tumor_Dataset(Dataset):
         threshold = AsDiscrete(threshold=0.5)
         target_image = threshold(target_image)
 
+        target_1 = self.resize(256)(target_image)
+        target_2 = self.resize(128)(target_image)
+        target_3 = self.resize(64)(target_image)
+        target_4 = self.resize(32)(target_image)
 
-        return input_image, target_image
+
+        return input_image, [target_image,target_1,target_2,target_3,target_4]
     
 if __name__ == "__main__":
     dataset_path = "/mount_folder/Tumors/train/undersampling"
     dataset = tumor_Dataset(dataset_path)
-    print(len(dataset))
     dataloader = DataLoader(dataset,batch_size=1,shuffle=True)
+
+    print(next(iter(dataloader))[1][1].shape)
 
