@@ -300,7 +300,7 @@ class SpatialGate(nn.Module):
 
 
 class Topt_CBAM(nn.Module):
-    def __init__(self, gate_channels, percent_t, reduction_ratio=16, pool_types=['avg', 'max'], no_spatial=False):
+    def __init__(self, gate_channels, percent_t=1.0, reduction_ratio=16, pool_types=['avg', 'max'], no_spatial=False):
         super(Topt_CBAM, self).__init__()
         self.percent_t = percent_t
         self.reduction_ratio = reduction_ratio
@@ -362,7 +362,7 @@ class custom_LKA(nn.Module):
         #self.conv_spatial1 = nn.Conv2d(2, dim, 5, stride=1, padding=6, dilation=3)
 
         self.conv_spatial1 = nn.Conv2d(2, dim, 5, stride=1,padding=2)
-        self.conv_spatial2 = nn.Conv2d(dim, dim, 7, stride=1, padding=3)
+        self.conv_spatial2 = nn.Conv2d(dim, dim, 7, stride=1, padding=9, dilation=3,groups=dim)
         self.norm = nn.GroupNorm(dim,dim)
         self.conv1 = nn.Conv2d(dim, dim, 1)
 
@@ -381,4 +381,31 @@ class custom_LKA(nn.Module):
         x = self.act(x)
 
         return x * u
+
+class LKA_custom_v2(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        #self.conv_spatial1 = nn.Conv2d(2, dim, 5, stride=1, padding=6, dilation=3)
+
+        self.conv_spatial1 = nn.Conv2d(2, dim, 5, stride=1,padding=2)
+        self.conv_spatial2 = nn.Conv2d(dim, dim, 7, stride=1, padding=9, dilation=3,groups=dim)
+        self.norm = nn.GroupNorm(dim,dim)
+        self.conv1 = nn.Conv2d(dim, dim, 1)
+
+        self.act = nn.Sigmoid()
+
+    def forward(self, x):
+        u = x.clone()
+        avg_out = torch.mean(x,dim=1, keepdim=True)
+        max_out,_ = torch.max(x,dim=1, keepdim=True)   
+        x = torch.cat([avg_out, max_out],dim=1)
+        
+        x = self.conv_spatial1(x)
+        x = self.conv_spatial2(x)
+        x = self.conv1(x)
+        x = self.norm(x)
+        x = self.act(x)
+
+        return x * u
+
 
