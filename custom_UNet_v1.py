@@ -19,9 +19,11 @@ class DoubleConv(nn.Module):
         x = self.conv7x7(x)
         x = self.conv1x1_1(x)
         x = self.norm(x)
+        x = self.act(x)
 
         x = self.conv3x3(x)
         x = self.conv1x1_2(x)
+        x = self.norm2(x)
         x = self.act(x)
 
         return x
@@ -43,9 +45,11 @@ class Bottom(nn.Module):
         x = self.conv7x7(x)
         x = self.conv1x1_1(x)
         x = self.norm(x)
+        x = self.act(x)
 
         x = self.conv3x3(x)
         x = self.conv1x1_2(x)
+        x = self.norm2(x)
         x = self.act(x)
 
         return x
@@ -144,11 +148,11 @@ class custom_UNet_V1(nn.Module):
         super().__init__()
 
         self.enc1 = DoubleConv(in_channels=input_class,out_channels=16) 
-        self.res1 = ResPath(16,2,1.0)
+        self.res1 = ResPath(16,4,1.0)
         self.down1 = Down(64)
         
         self.enc2 = DoubleConv(64,32)
-        self.res2 = ResPath(32,2,1.0)
+        self.res2 = ResPath(32,3,1.0)
         self.down2 = Down(128)
         
         self.enc3 = DoubleConv(128,64)
@@ -157,7 +161,7 @@ class custom_UNet_V1(nn.Module):
         
 
         self.enc4 = DoubleConv(256,128)
-        self.res4 = ResPath(128,2,1.0)
+        self.res4 = ResPath(128,1,1.0)
         self.down4 = Down(512)
         
         
@@ -166,15 +170,12 @@ class custom_UNet_V1(nn.Module):
 
         self.up4 = Up(128)
         self.dec4 = DoubleConv(256,256)
-        self.dim4 = nn.Conv2d(256,1,1)
 
         self.up3 = Up(64)
         self.dec3 = DoubleConv(128,128)
-        self.dim3 = nn.Conv2d(128,1,1)
 
         self.up2 = Up(32)
         self.dec2 = DoubleConv(64,64)
-        self.dim2 = nn.Conv2d(64,1,1)
 
         self.up1 = Up(16)
         self.dec1 = DoubleConv(32,16)
