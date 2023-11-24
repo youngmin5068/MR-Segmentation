@@ -186,28 +186,16 @@ class custom_UNet_V1(nn.Module):
         x1 = self.enc1(x)
 
         x2 = self.enc2(self.down1((x1)))
-        x2 = x2.to(x1.device)
-
         x3 = self.enc3(self.down2((x2)))
-        x3 = x3.to(x2.device)
-
         x4 = self.enc4(self.down3((x3)))
-        x4= x4.to(x4.device)
-
         x5 = self.enc5(self.down4((x4)))
-        x5 = x5.to(x4.device)
+
 
         x6 = self.dec4(torch.cat([(self.up4(x5)),self.res4(x4)],dim=1))
-        x6 = x6.to(x5.device)
-
         x7 = self.dec3(torch.cat([(self.up3(x6)),self.res3(x3)],dim=1))
-        x7 = x7.to(x6.device)
-
         x8 = self.dec2(torch.cat([(self.up2(x7)),self.res2(x2)],dim=1))
-        x8 = x8.to(x7.device)
-
         x9 = self.dec1(torch.cat([(self.up1(x8)),self.res1(x1)],dim=1))
-        x9 = x9.to(x8.device)
+
 
         out = self.out(x9)
 
