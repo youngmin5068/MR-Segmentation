@@ -12,7 +12,7 @@ from monai.transforms import AsDiscrete
 from Small_dataset import tumor_Dataset
 from dataloader import data_load
 from Nested_UNet import NestedUNet
-from custom_UNet_v2 import custom_UNet_V2_small
+from custom_UNet_v2 import custom_UNet_V2, custom_UNet_V2_small
 from custom_UNet_v1 import custom_UNet_V1
 from tumorSeg_model import tumor_model
 from UNet import UNet
@@ -136,7 +136,7 @@ def train_net(net,
                     logging.info("Created checkpoint directory")
                 except OSError:
                     pass
-                torch.save(net.state_dict(), DIR_CHECKPOINT + f'/UNet_smallTumor_v3.pth') #v1 - Nested UNet v2 - swinunetr v3 - custom_UNetv1 수정본
+                torch.save(net.state_dict(), DIR_CHECKPOINT + f'/UNet_smallTumor_v4.pth') #v1 - Nested UNet / v2 - swinunetr / v3 - custom_UNetv1 수정본 / v4 - custom_UNetv2
                 logging.info(f'Checkpoint {epoch + 1} saved !')
 
         if patience_check >= patience_limit: # early stopping 조건 만족 시 조기 종료
@@ -156,9 +156,9 @@ if __name__ == '__main__':
     device = torch.device(f'cuda:0' if torch.cuda.is_available() else 'cpu')
     logging.info(f'Using device {device}')
 
-    #net = tumor_model(img_size=(512,512),spatial_dims=2,in_channels=1,out_channels=1,depths=(2,2,2,2),feature_size=36).to(device=device)
+    #net = tumor_model(img_size=(512,512),spatial_dims=2,in_channels=1,out_channels=1,depths=(2,4,8,2),feature_size=36).to(device=device)
     #net = NestedUNet(1,1).to(device=device)
-    net = custom_UNet_V1(1,1).to(device=device)
+    net = custom_UNet_V2_small(1,1).to(device=device)
     if torch.cuda.device_count() > 1:
         net = nn.DataParallel(net,device_ids=[0,1,2,3])
 
@@ -168,9 +168,9 @@ if __name__ == '__main__':
     # if torch.cuda.device_count() > 1:
     #     roi_model = nn.DataParallel(roi_model,device_ids=[0,1,2,3]) 
 
-    # roi_model.load_state_dict(torch.load(model_path))
+    # roi_model.load_state_dict(torch.load(model_path))``
 
-    train_net(net=net,batch_size=16,lr=0.0001,epochs=500,device=device)
+    train_net(net=net,batch_size=32,lr=0.0001,epochs=500,device=device)
 
 
 
