@@ -56,14 +56,13 @@ def train_net(net,
 
     optimizer = optim.AdamW(net.parameters(),betas=(0.9,0.999),lr=lr,weight_decay=1e-5) # weight_decay : prevent overfitting
     #scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer,T_0=10,T_mult=2,eta_min=0.00005,last_epoch=-1)
-    scheduler = optim.lr_scheduler.MultiStepLR(optimizer,milestones=[30],gamma=5)
+    scheduler = optim.lr_scheduler.MultiStepLR(optimizer,milestones=[50],gamma=5)
     diceloss = DiceLoss()
     bceloss = nn.BCEWithLogitsLoss()
    
     threshold = AsDiscrete(threshold=0.5)
 
     best_epoch = 0 
-    best_loss = 10 ** 9 # 매우 큰 값으로 초기값 가정
     best_dice = 0.0
     patience_limit = 500 # 몇 번의 epoch까지 지켜볼지를 결정
     patience_check = 0
@@ -76,7 +75,7 @@ def train_net(net,
         for imgs,true_masks in train_loader:
     
             imgs = imgs.to(device=device, dtype=torch.float32)
-            true_masks = [true_mask.to(device=device,dtype=torch.float32) for true_mask in true_masks]
+            true_masks = true_masks.to(device=device,dtype=torch.float32)
             for param in net.parameters():
                 param.grad = None
 
@@ -86,14 +85,12 @@ def train_net(net,
             #     roi_results = imgs * roi_thresh
 
             masks_preds = net(imgs)
-            loss1 = diceloss(torch.sigmoid(masks_preds[0]),true_masks[0])
-            loss2 = diceloss(torch.sigmoid(masks_preds[1]),true_masks[1])
-            loss3 = diceloss(torch.sigmoid(masks_preds[2]),true_masks[2])
-            loss4 = diceloss(torch.sigmoid(masks_preds[3]),true_masks[3])
-            loss5 = diceloss(torch.sigmoid(masks_preds[4]),true_masks[4])
-            
+            loss1 = diceloss(torch.sigmoid(masks_preds),true_masks)
+            loss2 = bceloss(masks_preds, true_masks)
+   
+
             #loss2 = bceloss(masks_preds,true_masks)
-            loss = loss1 + loss2 + loss3 + loss4 + loss5
+            loss = loss1 + loss2 
             loss.backward()
 
             nn.utils.clip_grad_value_(net.parameters(), 0.1)     
@@ -117,14 +114,14 @@ def train_net(net,
         dice = 0.0
         for imgs, true_masks in val_loader:
             imgs = imgs.to(device=device,dtype=torch.float32)
-            true_masks = [true_mask.to(device=device,dtype=torch.float32) for true_mask in true_masks]
+            true_masks = true_masks.to(device=device,dtype=torch.float32)
 
             with torch.no_grad():
                 mask_pred = net(imgs)
 
             pred_thresh = threshold(mask_pred)
             
-            dice += dice_score(pred_thresh, true_masks[0])
+            dice += dice_score(pred_thresh, true_masks)
 
         mean_dice_score = dice/len(val_loader)
 
@@ -142,17 +139,17 @@ def train_net(net,
                     logging.info("Created checkpoint directory")
                 except OSError:
                     pass
-                torch.save(net.state_dict(), DIR_CHECKPOINT + f'/custom_UNet_v_0_1_b.pth')
+                torch.save(net.state_dict(), DIR_CHECKPOINT + f'/att_SwinUNetr_v_0_1_e.pth') # d-> custom_UNet_V2 /// e -> att swinUNetr  ////f -> custom unet v2
                 logging.info(f'Checkpoint {epoch + 1} saved !')
 
         if patience_check >= patience_limit: # early stopping 조건 만족 시 조기 종료
             break
 
-        print("best epoch : {}, best loss : {:.4f}, best dice : {:.4f}".format(best_epoch+1, best_loss,best_dice))
+        print("best epoch : {}, best dice : {:.4f}".format(best_epoch+1,best_dice))
                
   
         scheduler.step()
-        #print("epoch : {} , best_dice : {:.4f}, best_recall : {:.4f}, best_precision : {:.4f}".format(best_epoch, best_dice,best_recall,best_precision))
+    
 
 if __name__ == '__main__':
     Model_SEED = 7777777
@@ -162,11 +159,11 @@ if __name__ == '__main__':
     device = torch.device(f'cuda:0' if torch.cuda.is_available() else 'cpu')
     logging.info(f'Using device {device}')
 
-    #net = tumor_model(img_size=(512,512),spatial_dims=2,in_channels=1,out_channels=1,depths=(2,2,2,2),feature_size=36).to(device=device)
-    net = custom_UNet_V2(1,1).to(device=device)
+    net = tumor_model(img_size=(512,512),spatial_dims=2,in_channels=1,out_channels=1,depths=(2,2,2,2),feature_size=48).to(device=device)
+    #net = custom_UNet_V2(1,1).to(device=device)
     #net = ACC_UNet_Lite(1,1).to(device=device)
     if torch.cuda.device_count() > 1:
-        net = nn.DataParallel(net,device_ids=[0,1,2,3])
+        net = nn.DataParallel(net,device_ids=[0,1,2,3,4])
 
 
     # model_path = B_DIR_CHECKPOINT + '/ROI_Model_231114.pth'
@@ -176,7 +173,7 @@ if __name__ == '__main__':
 
     # roi_model.load_state_dict(torch.load(model_path))
 
-    train_net(net=net,batch_size=BATCH_SIZE,lr=LEARNINGRATE,epochs=EPOCHS,device=device)
+    train_net(net=net,batch_size=32,lr=LEARNINGRATE,epochs=EPOCHS,device=device)
 
 
 
