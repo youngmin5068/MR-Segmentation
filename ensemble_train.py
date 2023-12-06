@@ -19,6 +19,7 @@ from Nested_UNet import NestedUNet
 import torchvision.transforms as transforms
 from custom_UNet_v2 import custom_UNet_V2
 from custom_UNet_v1 import custom_UNet_V1
+from custom_UNet_v3 import custom_UNet_V3
 
 
 def set_seed(seed):
@@ -149,8 +150,8 @@ def train_net(net,
                     logging.info("Created checkpoint directory")
                 except OSError:
                     pass
-                torch.save(net.state_dict(), DIR_CHECKPOINT + f'/ensemble_model1_b.pth') # d-> custom_UNet_V2 /// e -> att swinUNetr  ////f -> custom unet v2 //ensemble
-                torch.save(net2.state_dict(), DIR_CHECKPOINT + f'/ensemble_model2_b.pth') #ensemble_model2 - custom v2, ensemble_model2_b - custom v1
+                torch.save(net.state_dict(), DIR_CHECKPOINT + f'/ensemble_model1_exclude_tumor_model_with_customV1.pth') # d-> custom_UNet_V2 /// e -> att swinUNetr  ////f -> custom unet v2 //ensemble
+                torch.save(net2.state_dict(), DIR_CHECKPOINT + f'/ensemble_model2_exclude_customV1.pth') #ensemble_model2 - custom v2, ensemble_model2_b - custom v1
                 logging.info(f'Checkpoint {epoch + 1} saved !')
 
         if patience_check >= patience_limit: # early stopping 조건 만족 시 조기 종료
@@ -171,12 +172,12 @@ if __name__ == '__main__':
     logging.info(f'Using device {device}')
 
     net = tumor_model(img_size=(512,512),spatial_dims=2,in_channels=1,out_channels=1,depths=(2,2,2,2),feature_size=24).to(device=device)
-    net2 = custom_UNet_V2(1, 1).to(device=device)
+    net2 = custom_UNet_V1(1, 1).to(device=device)
     #net = custom_UNet_V2(1,1).to(device=device)
     #net = ACC_UNet_Lite(1,1).to(device=device)
     if torch.cuda.device_count() > 1:
-        net = nn.DataParallel(net,device_ids=[0,1,2,3,4])
-        net2 = nn.DataParallel(net2,device_ids=[0,1,2,3,4])
+        net = nn.DataParallel(net,device_ids=[0,1,2,3,4,5])
+        net2 = nn.DataParallel(net2,device_ids=[0,1,2,3,4,5])
 
 
     # model_path = B_DIR_CHECKPOINT + '/ROI_Model_231114.pth'
