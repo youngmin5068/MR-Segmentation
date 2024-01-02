@@ -4,51 +4,67 @@ import torch as torch
 from torch.utils.data import Dataset,DataLoader
 import torchvision.transforms as transforms
 import os
-import cv2
 from einops import rearrange
 from custom_transforms import *
 import pydicom
 from pydicom.pixel_data_handlers.util import apply_voi_lut
 from monai.transforms import AsDiscrete
-
-
+import cv2
 
 class tumor_Dataset(Dataset):
     def __init__(self,path, train=True):
         self.path = path
         self.train = train
 
+        patients = [f for f in os.listdir(self.path)]
+        patients.sort()
+
         self.train_path_list = []
         self.label_path_list = []
         self.mask_path_list = []
+
+        if self.train:
+            weird =['5140749',
+                    '7280265',
+                    '1649257',
+                    '7871065',
+                    '3033890',
+                    '3149487',
+                    '3559627',
+                    '4716956',
+                    '3849047',
+                    '6968225']
+            patients = [f for f in patients if str(f) not in weird]
+
+        for p in patients:
+            train_path = [self.path+f"{p}/undersampling/input/" + f for f in  os.listdir(self.path+f"{p}/undersampling/input")]
+            train_path.sort()
+            self.train_path_list = self.train_path_list + train_path
+
+            label_path = [self.path+f"{p}/undersampling/target/" + f for f in  os.listdir(self.path+f"{p}/undersampling/target")]
+            label_path.sort()
+            self.label_path_list = self.label_path_list + label_path
+
+            mask_path = [self.path+f"{p}/undersampling/breast_roi/" + f for f in os.listdir(self.path+f"{p}/undersampling/breast_roi")]
+            mask_path.sort()
+            self.mask_path_list = self.mask_path_list + mask_path
+
+        self.train_path_list.sort()
+        self.label_path_list.sort()
+        self.mask_path_list.sort()
  
 
-        self.train_path = path + "/input"
-        self.label_path = path + "/target"
-        self.mask_path = path + "/breast_roi"
-
-        
-        for file in os.listdir(self.train_path):
-            self.train_path_list.append(os.path.join(self.train_path,file))
-        self.train_path_list.sort()
-                
-        for file in os.listdir(self.label_path):
-            self.label_path_list.append(os.path.join(self.label_path,file))           
-        self.label_path_list.sort()
-
-        for file in os.listdir(self.mask_path):
-            self.mask_path_list.append(os.path.join(self.mask_path,file))           
-        self.mask_path_list.sort()
-
-
+    
     def __len__(self):
-        return len(self.label_path_list)
+        return len(self.mask_path_list)
 
     def preprocessing(self,train_path, label_path, mask_path):
         
         input_slice = pydicom.read_file(train_path)
+        positions = pydicom.dcmread(train_path).ImagePositionPatient
+
         input_img = input_slice.pixel_array
-        #input_img = apply_voi_lut(input_img, input_slice)
+        input_img = apply_voi_lut(input_img, input_slice)
         epsilon = 1e-10
         min_val = np.min(input_img)
         max_val = np.max(input_img)
@@ -61,41 +77,62 @@ class tumor_Dataset(Dataset):
         min_val = np.min(target_img)
         max_val = np.max(target_img)
         target_img = (target_img - min_val) / (max_val - min_val+epsilon)
-        
+
 
         np_img = np.array(Image.open(mask_path))
-        np_img = np_img/255.0
 
 
-        contours, _ = cv2.findContours(np_img.astype('uint8'), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if positions[1] < 0 :
+            input_img = np.flipud(input_img)
+            target_img = np.flipud(target_img)
+            np_img = np.flipud(np_img)
+
+
+        contours, _ = cv2.findContours(np_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         rects = []
 
         for contour in contours:
             rects.append(cv2.boundingRect(contour))
 
-        if len(rects) > 0:
-            y_min = min(rect[1] for rect in rects)
-            y_max = max(rect[1] + rect[3] for rect in rects)
+        
+        y_min = min(rect[1] for rect in rects)
+        y_max = max(rect[1] + rect[3] for rect in rects)
 
-            input_img = input_img[y_min:y_max,:]
-            target_img = target_img[y_min:y_max,:]
+        y_length = y_max - y_min
+
+
+        if y_length < 192:
+            crop_input_img = input_img[y_min-(192 - y_length)//2:y_max + (192-y_length)//2,:]
+            crop_target_img = target_img[y_min-(192 - y_length)//2:y_max + (192-y_length)//2,:]
+    
         else:
-            input_img = input_img[200:320,:]
-            target_img = target_img[200:320,:]
+            crop_input_img = input_img[y_min:y_max,:]
+            crop_target_img = target_img[y_min:y_max,:]
+
+
+
 
         input_img = Image.fromarray(input_img)
         target_img = Image.fromarray(target_img)
 
 
-        return input_img, target_img
+
+        return input_img, target_img,crop_input_img,crop_target_img
 
 
 
     def __getitem__(self,idx):
         if self.train:
             self.transform = transforms.Compose([transforms.ToTensor(),
-                                                transforms.Resize((256,512)),
+                                                transforms.Resize((512,512)),
+                                                customRandomRotate(degrees=10,SEED=idx),
+                                                customRandomHorizontalFlip(p=0.5,SEED=idx),
+                                                customRandomVerticalFlip(p=0.5,SEED=idx)
+                                                #customRandomResizedCrop(SEED=idx, size=(256,256))
+                                                ])
+            self.crop_transform = transforms.Compose([transforms.ToTensor(),
+                                                transforms.Resize((192,512)),
                                                 customRandomRotate(degrees=10,SEED=idx),
                                                 customRandomHorizontalFlip(p=0.5,SEED=idx),
                                                 customRandomVerticalFlip(p=0.5,SEED=idx)
@@ -103,29 +140,36 @@ class tumor_Dataset(Dataset):
                                                 ])
         else:
             self.transform = transforms.Compose([transforms.ToTensor(),
-                                                 #transforms.Resize((256,256)),
+                                                 transforms.Resize((512,512)),
+                                                 #customRandomResizedCrop(SEED=idx, size=(256,256))
+                                                 ])
+            self.crop_transform = transforms.Compose([transforms.ToTensor(),
+                                                 transforms.Resize((512,512)),
                                                  #customRandomResizedCrop(SEED=idx, size=(256,256))
                                                  ])
 
 
-        image,label = self.preprocessing(self.train_path_list[idx], self.label_path_list[idx],self.mask_path_list[idx])    
+        image,label,crop_img,crop_label = self.preprocessing(self.train_path_list[idx], self.label_path_list[idx],self.mask_path_list[idx])    
+        
+        input_image = (self.transform(image))
+        target_image = (self.transform(label))
 
-        contrast = transforms.ColorJitter(contrast=(0,1.5))
-
-        input_image = self.transform(image)
-        target_image = self.transform(label)
+        crop_img = self.crop_transform(crop_img)
+        crop_label = self.crop_transform(crop_label)
 
         threshold = AsDiscrete(threshold=0.5)
         target_image = threshold(target_image)
+        crop_label = threshold(crop_label)
 
 
-        return input_image, target_image
+
+        return input_image, target_image, crop_img, crop_label
     
-    
-if __name__ == "__main__":
-    dataset_path = "/mount_folder/Tumors/train/undersampling"
-    dataset = tumor_Dataset(dataset_path)
-    dataloader = DataLoader(dataset,batch_size=1,shuffle=True)
 
-    print(next(iter(dataloader))[1].shape)
+# dataset = tumor_Dataset(path="/mount_folder/New_Tumors/tuning/")
 
+# loader = DataLoader(dataset,batch_size=1,shuffle=True)
+
+# sample = next(iter(loader))
+
+# print(torch.unique(sample[1]))
